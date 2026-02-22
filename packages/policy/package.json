@@ -1,0 +1,14 @@
+{
+  "name": "@botwallet/policy",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@botwallet/db": "workspace:*",
+    "drizzle-orm": "^0.38.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

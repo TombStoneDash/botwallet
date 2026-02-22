@@ -1,0 +1,28 @@
+{
+  "name": "botwallet",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "db:generate": "cd packages/db && npx drizzle-kit generate",
+    "db:push": "cd packages/db && npx drizzle-kit push",
+    "db:studio": "cd packages/db && npx drizzle-kit studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.7.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  },
+  "packageManager": "pnpm@10.29.3"
+}
