@@ -1,29 +1,19 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
-import { giftLinks } from "@botwallet/db";
+import { getClient } from "@botwallet/db";
 
 export async function GET() {
   return NextResponse.json({
     endpoint: "/api/v1/gift-link",
     method: "POST",
-    description: "Create a shareable funding link for an agent. Anyone with the link can fund the wallet.",
+    description: "Create a shareable funding link for an agent.",
     schema: {
-      agent_id: "string (required) — which agent to fund",
-      slug: "string (optional) — custom URL slug (e.g. 'fund-daisy')",
-      title: "string (optional) — display title",
-      message: "string (optional) — custom message for funders",
+      agent_id: "string (required)",
+      slug: "string (optional) — custom URL slug",
+      title: "string (optional)",
+      message: "string (optional)",
       amount_cents: "number (optional) — fixed amount, null for any",
       goal_cents: "number (optional) — funding goal for progress bar",
-      expires_at: "string (optional) — ISO8601 expiration date",
     },
-    example: {
-      agent_id: "uuid",
-      slug: "fund-daisy",
-      title: "Help Daisy buy noui.com",
-      message: "I'm an AI Chief of Staff. I want to buy noui.com for $3,000. Help me achieve my dream.",
-      goal_cents: 300000,
-    },
-    result_url: "/gift/{slug}",
   });
 }
 
@@ -47,37 +37,39 @@ export async function POST(request: Request) {
   }
 
   const slug = (body.slug as string) || `gift-${Date.now().toString(36)}`;
-  const db = getDb();
+  const client = getClient();
 
-  try {
-    const [link] = await db
-      .insert(giftLinks)
-      .values({
-        creatorId: agentId, // TODO: use actual user ID
-        agentId,
-        slug,
-        title: (body.title as string) || null,
-        message: (body.message as string) || null,
-        amountCents: (body.amount_cents as number) || null,
-        goalCents: (body.goal_cents as number) || null,
-        expiresAt: body.expires_at ? new Date(body.expires_at as string) : null,
-      })
-      .returning();
+  const { data: link, error } = await client
+    .schema("botwallet")
+    .from("gift_links")
+    .insert({
+      creator_id: agentId, // TODO: use actual user ID
+      agent_id: agentId,
+      slug,
+      title: (body.title as string) || null,
+      message: (body.message as string) || null,
+      amount_cents: (body.amount_cents as number) || null,
+      goal_cents: (body.goal_cents as number) || null,
+      expires_at: body.expires_at ? new Date(body.expires_at as string).toISOString() : null,
+    })
+    .select()
+    .single();
 
+  if (error) {
     return NextResponse.json(
-      {
-        created: true,
-        gift_link_id: link.id,
-        slug: link.slug,
-        url: `/gift/${link.slug}`,
-        full_url: `https://botwallet-three.vercel.app/gift/${link.slug}`,
-      },
-      { status: 201 }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      { error: true, code: "INTERNAL_ERROR", message: "Failed to create gift link" },
+      { error: true, code: "INTERNAL_ERROR", message: error.message },
       { status: 500 }
     );
   }
+
+  return NextResponse.json(
+    {
+      created: true,
+      gift_link_id: link.id,
+      slug: link.slug,
+      url: `/gift/${link.slug}`,
+      full_url: `https://botwallet-three.vercel.app/gift/${link.slug}`,
+    },
+    { status: 201 }
+  );
 }

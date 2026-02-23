@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { getDb } from "@/lib/db";
+import { getClient } from "@botwallet/db";
 import { generateApiKey } from "@/lib/auth";
-import { users, agents, accounts } from "@botwallet/db";
 
 export async function GET() {
   return NextResponse.json({
@@ -10,16 +8,10 @@ export async function GET() {
     method: "POST",
     description: "Register a new agent and get an API key. Creates wallet accounts automatically.",
     schema: {
-      owner_email: "string (required) — your email",
-      owner_name: "string (optional) — your name",
-      agent_name: "string (required) — name for your agent",
-      agent_description: "string (optional) — what your agent does",
-    },
-    example: {
-      owner_email: "hudson@tombstonedash.com",
-      owner_name: "Hudson Taylor",
-      agent_name: "Daisy",
-      agent_description: "AI Chief of Staff — ops, content, deploys, email management",
+      owner_email: "string (required)",
+      owner_name: "string (optional)",
+      agent_name: "string (required)",
+      agent_description: "string (optional)",
     },
   });
 }
@@ -45,56 +37,33 @@ export async function POST(request: Request) {
     );
   }
 
-  const db = getDb();
-
-  // Find or create user
-  let [user] = await db.select().from(users).where(eq(users.email, ownerEmail));
-  if (!user) {
-    [user] = await db
-      .insert(users)
-      .values({
-        email: ownerEmail,
-        name: (body.owner_name as string) || null,
-      })
-      .returning();
-  }
-
-  // Generate API key
+  const client = getClient();
   const { key, hash, prefix } = generateApiKey();
 
-  // Create agent
-  const [agent] = await db
-    .insert(agents)
-    .values({
-      ownerId: user.id,
-      name: agentName,
-      description: (body.agent_description as string) || null,
-      apiKeyHash: hash,
-      apiKeyPrefix: prefix,
-    })
-    .returning();
+  const { data, error } = await client.rpc("bw_register_agent", {
+    p_owner_email: ownerEmail,
+    p_owner_name: (body.owner_name as string) || null,
+    p_agent_name: agentName,
+    p_agent_description: (body.agent_description as string) || null,
+    p_api_key_hash: hash,
+    p_api_key_prefix: prefix,
+  });
 
-  // Create agent accounts (credits + holds)
-  await db.insert(accounts).values([
-    {
-      agentId: agent.id,
-      type: "agent_credits",
-      name: `${agentName} Credits`,
-    },
-    {
-      agentId: agent.id,
-      type: "agent_holds",
-      name: `${agentName} Holds`,
-    },
-  ]);
+  if (error) {
+    return NextResponse.json(
+      { error: true, code: "INTERNAL_ERROR", message: error.message },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json(
     {
       registered: true,
-      agent_id: agent.id,
+      agent_id: data.agent_id,
       agent_name: agentName,
       api_key: key,
       api_key_prefix: prefix,
+      accounts: data.accounts,
       message: `${agentName} is registered! Save this API key — it won't be shown again.`,
       next_steps: {
         check_balance: "GET /api/v1/balance (Authorization: Bearer bw_...)",

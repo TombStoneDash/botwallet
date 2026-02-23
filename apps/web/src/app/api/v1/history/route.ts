@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
 import { authenticateAgent } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getClient, T } from "@botwallet/db";
 import { getHistory } from "@botwallet/ledger";
-import { accounts } from "@botwallet/db";
 
 export async function GET(request: Request) {
   const agent = await authenticateAgent(request);
@@ -18,19 +16,20 @@ export async function GET(request: Request) {
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "20"), 100);
   const offset = parseInt(url.searchParams.get("offset") || "0");
 
-  const db = getDb();
+  const client = getClient();
 
-  // Get agent's credits account
-  const [creditsAccount] = await db
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.agentId, agent.id), eq(accounts.type, "agent_credits")));
+  const { data: creditsAccount } = await client
+    .from(T.accounts)
+    .select("*")
+    .eq("agent_id", agent.id)
+    .eq("type", "agent_credits")
+    .single();
 
   if (!creditsAccount) {
     return NextResponse.json({ entries: [], total: 0 });
   }
 
-  const entries = await getHistory(db, creditsAccount.id, { limit, offset });
+  const entries = await getHistory(client, creditsAccount.id, { limit, offset });
 
   return NextResponse.json({
     agent: agent.name,

@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
 import { authenticateAgent } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getClient } from "@botwallet/db";
 import { getBalance, placeHold, completeSpend } from "@botwallet/ledger";
 import { checkPolicies } from "@botwallet/policy";
-import { accounts, spendRequests, auditLog } from "@botwallet/db";
 
-export async function GET(request: Request) {
+export async function GET() {
   return NextResponse.json({
     endpoint: "/api/v1/spend",
     method: "POST",
@@ -19,12 +17,6 @@ export async function GET(request: Request) {
       category: "string (optional) — api | image_gen | tools | comms | other",
       metadata: "object (optional) — custom metadata",
       idempotency_key: "string (optional) — prevent double-processing",
-    },
-    example: {
-      amount: 5.0,
-      merchant: "openai.com",
-      description: "GPT-4o API call for Scene Partner",
-      category: "api",
     },
   });
 }
@@ -66,10 +58,10 @@ export async function POST(request: Request) {
   }
 
   const amountCents = Math.round(amountDollars * 100);
-  const db = getDb();
+  const client = getClient();
 
   // Check balance
-  const balance = await getBalance(db, agent.id);
+  const balance = await getBalance(client, agent.id);
   if (balance.availableCents < amountCents) {
     return NextResponse.json(
       {
@@ -83,7 +75,7 @@ export async function POST(request: Request) {
   }
 
   // Check policies
-  const decision = await checkPolicies(db, {
+  const decision = await checkPolicies(client, {
     agentId: agent.id,
     amountCents,
     merchant,
@@ -91,13 +83,14 @@ export async function POST(request: Request) {
   });
 
   // Get agent accounts
-  const agentAccounts = await db
-    .select()
-    .from(accounts)
-    .where(eq(accounts.agentId, agent.id));
+  const { data: agentAccounts } = await client
+    .schema("botwallet")
+    .from("accounts")
+    .select("*")
+    .eq("agent_id", agent.id);
 
-  const creditsAccount = agentAccounts.find((a) => a.type === "agent_credits");
-  const holdsAccount = agentAccounts.find((a) => a.type === "agent_holds");
+  const creditsAccount = agentAccounts?.find((a: any) => a.type === "agent_credits");
+  const holdsAccount = agentAccounts?.find((a: any) => a.type === "agent_holds");
 
   if (!creditsAccount || !holdsAccount) {
     return NextResponse.json(
@@ -107,44 +100,61 @@ export async function POST(request: Request) {
   }
 
   // Create spend request
-  const [spendRequest] = await db
-    .insert(spendRequests)
-    .values({
-      agentId: agent.id,
-      amountCents,
+  const { data: spendRequest, error: spendErr } = await client
+    .schema("botwallet")
+    .from("spend_requests")
+    .insert({
+      agent_id: agent.id,
+      amount_cents: amountCents,
       merchant,
       description: (body.description as string) || null,
       category: (body.category as string) || null,
       status: decision.approved ? "approved" : decision.requiresHumanApproval ? "pending" : "denied",
-      autoApproved: decision.autoApproved,
-      denialReason: decision.reason && !decision.approved ? decision.reason : null,
-      policyId: decision.policyId || null,
+      auto_approved: decision.autoApproved,
+      denial_reason: decision.reason && !decision.approved ? decision.reason : null,
+      policy_id: decision.policyId || null,
       metadata: (body.metadata as Record<string, unknown>) || null,
-      expiresAt: decision.requiresHumanApproval
-        ? new Date(Date.now() + 24 * 60 * 60 * 1000) // 24h expiry
+      expires_at: decision.requiresHumanApproval
+        ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
         : null,
     })
-    .returning();
+    .select()
+    .single();
+
+  if (spendErr || !spendRequest) {
+    return NextResponse.json(
+      { error: true, code: "INTERNAL_ERROR", message: "Failed to create spend request" },
+      { status: 500 }
+    );
+  }
 
   // If approved, place hold and complete spend
   if (decision.approved) {
-    // Get or create a system account for platform
-    let platformAccount = agentAccounts.find((a) => a.type === "platform_fees");
+    // Get or create platform fees account
+    let platformAccount = agentAccounts?.find((a: any) => a.type === "platform_fees");
     if (!platformAccount) {
-      // Use a suspense account — we just need a destination for the double-entry
-      const [sys] = await db
-        .insert(accounts)
-        .values({
+      const { data: newPlatform } = await client
+        .schema("botwallet")
+        .from("accounts")
+        .insert({
           type: "platform_fees",
           name: "Platform (spend destination)",
-          agentId: agent.id,
+          agent_id: agent.id,
         })
-        .returning();
-      platformAccount = sys;
+        .select()
+        .single();
+      platformAccount = newPlatform;
     }
 
-    const holdResult = await placeHold(
-      db,
+    if (!platformAccount) {
+      return NextResponse.json(
+        { error: true, code: "INTERNAL_ERROR", message: "Failed to create platform account" },
+        { status: 500 }
+      );
+    }
+
+    await placeHold(
+      client,
       creditsAccount.id,
       holdsAccount.id,
       amountCents,
@@ -153,7 +163,7 @@ export async function POST(request: Request) {
     );
 
     const spendResult = await completeSpend(
-      db,
+      client,
       holdsAccount.id,
       platformAccount.id,
       amountCents,
@@ -161,44 +171,45 @@ export async function POST(request: Request) {
     );
 
     // Mark spend as completed
-    await db
-      .update(spendRequests)
-      .set({ status: "completed", completedAt: new Date(), transactionId: spendResult.transactionId })
-      .where(eq(spendRequests.id, spendRequest.id));
+    await client
+      .schema("botwallet")
+      .from("spend_requests")
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        transaction_id: spendResult.transactionId,
+      })
+      .eq("id", spendRequest.id);
 
     // Audit log
-    await db.insert(auditLog).values({
-      actorType: "agent",
-      actorId: agent.id,
+    await client.schema("botwallet").from("audit_log").insert({
+      actor_type: "agent",
+      actor_id: agent.id,
       action: "spend_completed",
       target: merchant,
       details: { amountCents, merchant, autoApproved: true, spendRequestId: spendRequest.id },
     });
 
-    const newBalance = await getBalance(db, agent.id);
+    const newBalance = await getBalance(client, agent.id);
 
-    return NextResponse.json(
-      {
-        request_id: spendRequest.id,
-        status: "completed",
-        amount: `$${amountDollars.toFixed(2)}`,
-        amount_cents: amountCents,
-        merchant,
-        auto_approved: decision.autoApproved,
-        policy_reason: decision.reason,
-        remaining_cents: newBalance.availableCents,
-        remaining: `$${(newBalance.availableCents / 100).toFixed(2)}`,
-        transaction_id: spendResult.transactionId,
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({
+      request_id: spendRequest.id,
+      status: "completed",
+      amount: `$${amountDollars.toFixed(2)}`,
+      amount_cents: amountCents,
+      merchant,
+      auto_approved: decision.autoApproved,
+      policy_reason: decision.reason,
+      remaining_cents: newBalance.availableCents,
+      remaining: `$${(newBalance.availableCents / 100).toFixed(2)}`,
+      transaction_id: spendResult.transactionId,
+    });
   }
 
-  // If denied or pending
-  // Audit log
-  await db.insert(auditLog).values({
-    actorType: "system",
-    actorId: "policy-engine",
+  // Denied or pending
+  await client.schema("botwallet").from("audit_log").insert({
+    actor_type: "system",
+    actor_id: "policy-engine",
     action: decision.requiresHumanApproval ? "spend_pending_approval" : "spend_denied",
     target: merchant,
     details: { amountCents, merchant, reason: decision.reason, policyId: decision.policyId },
@@ -212,7 +223,7 @@ export async function POST(request: Request) {
       merchant,
       denial_reason: decision.reason,
       requires_human_approval: decision.requiresHumanApproval || false,
-      expires_at: spendRequest.expiresAt?.toISOString(),
+      expires_at: spendRequest.expires_at,
     },
     { status: decision.requiresHumanApproval ? 202 : 403 }
   );

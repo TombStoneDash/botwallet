@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getClient } from "@botwallet/db";
 import { getPolicySummary } from "@botwallet/policy";
 
 export async function GET(request: Request) {
@@ -12,8 +12,8 @@ export async function GET(request: Request) {
     );
   }
 
-  const db = getDb();
-  const activePolicies = await getPolicySummary(db, agent.id);
+  const client = getClient();
+  const activePolicies = await getPolicySummary(client, agent.id);
 
   return NextResponse.json({
     agent: agent.name,

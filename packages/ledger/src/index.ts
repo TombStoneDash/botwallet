@@ -1,30 +1,14 @@
-import { eq, sql, and, gte, lte, desc } from "drizzle-orm";
-import type { Database } from "@botwallet/db";
-import {
-  accounts,
-  transactions,
-  postings,
-  spendRequests,
-} from "@botwallet/db";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { T } from "@botwallet/db";
 
 // ─── Types ───
 
-export interface SpendRequest {
-  agentId: string;
-  amountCents: number;
-  merchant: string;
-  description?: string;
-  category?: string;
-  metadata?: Record<string, unknown>;
-  idempotencyKey?: string;
-}
-
 export interface FundRequest {
-  fromAccountId: string; // user's funding account
-  toAccountId: string;   // agent's credits account
+  fromAccountId: string;
+  toAccountId: string;
   amountCents: number;
   description?: string;
-  reference?: string;    // Stripe payment ID
+  reference?: string;
   idempotencyKey?: string;
 }
 
@@ -32,6 +16,7 @@ export interface LedgerResult {
   transactionId: string;
   success: boolean;
   error?: string;
+  idempotent?: boolean;
 }
 
 export interface BalanceResult {
@@ -47,247 +32,170 @@ export interface HistoryEntry {
   amountCents: number;
   description: string | null;
   metadata: unknown;
-  createdAt: Date;
+  createdAt: string;
 }
 
-// ─── Core Ledger Functions ───
+// ─── Core Ledger Functions (via Supabase RPC) ───
 
-/**
- * Get the balance of an account by summing all postings.
- * This is the source of truth — no stored balance field.
- */
 export async function getBalance(
-  db: Database,
+  client: SupabaseClient,
   agentId: string
 ): Promise<BalanceResult> {
-  // Get credits account balance
-  const creditsResult = await db
-    .select({
-      total: sql<number>`COALESCE(SUM(${postings.amountCents}), 0)`,
-    })
-    .from(postings)
-    .innerJoin(accounts, eq(postings.accountId, accounts.id))
-    .where(
-      and(eq(accounts.agentId, agentId), eq(accounts.type, "agent_credits"))
-    );
+  const { data, error } = await client.rpc("bw_get_agent_balance", {
+    p_agent_id: agentId,
+  });
 
-  // Get holds account balance
-  const holdsResult = await db
-    .select({
-      total: sql<number>`COALESCE(SUM(${postings.amountCents}), 0)`,
-    })
-    .from(postings)
-    .innerJoin(accounts, eq(postings.accountId, accounts.id))
-    .where(
-      and(eq(accounts.agentId, agentId), eq(accounts.type, "agent_holds"))
-    );
-
-  const totalCents = Number(creditsResult[0]?.total ?? 0);
-  const heldCents = Number(holdsResult[0]?.total ?? 0);
+  if (error) throw new Error(`Balance error: ${error.message}`);
 
   return {
-    availableCents: totalCents - heldCents,
-    heldCents,
-    totalCents,
-    currency: "USD",
+    availableCents: data.available_cents,
+    heldCents: data.held_cents,
+    totalCents: data.total_cents,
+    currency: data.currency,
   };
 }
 
-/**
- * Fund an agent's wallet. Creates a double-entry transaction:
- * Debit: user's funding source
- * Credit: agent's credits account
- */
 export async function fundAccount(
-  db: Database,
+  client: SupabaseClient,
   req: FundRequest
 ): Promise<LedgerResult> {
-  if (req.amountCents <= 0) {
-    return { transactionId: "", success: false, error: "Amount must be positive" };
-  }
+  const { data, error } = await client.rpc("bw_fund_account", {
+    p_from_account_id: req.fromAccountId,
+    p_to_account_id: req.toAccountId,
+    p_amount_cents: req.amountCents,
+    p_description: req.description || null,
+    p_reference: req.reference || null,
+    p_idempotency_key: req.idempotencyKey || null,
+  });
 
-  // Create transaction
-  const [tx] = await db
-    .insert(transactions)
-    .values({
-      type: "fund",
-      reference: req.reference,
-      description: req.description || `Fund $${(req.amountCents / 100).toFixed(2)}`,
-      idempotencyKey: req.idempotencyKey,
-      metadata: { source: "stripe" },
-    })
-    .returning();
+  if (error) throw new Error(`Fund error: ${error.message}`);
 
-  // Double-entry: debit source, credit destination
-  await db.insert(postings).values([
-    {
-      transactionId: tx.id,
-      accountId: req.fromAccountId,
-      amountCents: -req.amountCents, // debit (negative = money leaving)
-    },
-    {
-      transactionId: tx.id,
-      accountId: req.toAccountId,
-      amountCents: req.amountCents, // credit (positive = money arriving)
-    },
-  ]);
-
-  return { transactionId: tx.id, success: true };
+  return {
+    transactionId: data.transaction_id || "",
+    success: data.success,
+    error: data.error,
+    idempotent: data.idempotent,
+  };
 }
 
-/**
- * Place a hold on funds for a spend request.
- * Moves funds from credits → holds.
- */
 export async function placeHold(
-  db: Database,
+  client: SupabaseClient,
   creditsAccountId: string,
   holdsAccountId: string,
   amountCents: number,
   description?: string,
   idempotencyKey?: string
 ): Promise<LedgerResult> {
-  const [tx] = await db
-    .insert(transactions)
-    .values({
-      type: "hold",
-      description: description || `Hold $${(amountCents / 100).toFixed(2)}`,
-      idempotencyKey,
-    })
-    .returning();
+  const { data, error } = await client.rpc("bw_place_hold", {
+    p_credits_account_id: creditsAccountId,
+    p_holds_account_id: holdsAccountId,
+    p_amount_cents: amountCents,
+    p_description: description || null,
+    p_idempotency_key: idempotencyKey || null,
+  });
 
-  await db.insert(postings).values([
-    {
-      transactionId: tx.id,
-      accountId: creditsAccountId,
-      amountCents: -amountCents, // remove from credits
-    },
-    {
-      transactionId: tx.id,
-      accountId: holdsAccountId,
-      amountCents: amountCents, // add to holds
-    },
-  ]);
+  if (error) throw new Error(`Hold error: ${error.message}`);
 
-  return { transactionId: tx.id, success: true };
+  return {
+    transactionId: data.transaction_id || "",
+    success: data.success,
+    error: data.error,
+  };
 }
 
-/**
- * Release a hold (return funds from holds → credits).
- */
 export async function releaseHold(
-  db: Database,
+  client: SupabaseClient,
   creditsAccountId: string,
   holdsAccountId: string,
   amountCents: number,
   idempotencyKey?: string
 ): Promise<LedgerResult> {
-  const [tx] = await db
-    .insert(transactions)
-    .values({
-      type: "release",
-      description: `Release hold $${(amountCents / 100).toFixed(2)}`,
-      idempotencyKey,
-    })
-    .returning();
+  const { data, error } = await client.rpc("bw_release_hold", {
+    p_credits_account_id: creditsAccountId,
+    p_holds_account_id: holdsAccountId,
+    p_amount_cents: amountCents,
+    p_idempotency_key: idempotencyKey || null,
+  });
 
-  await db.insert(postings).values([
-    {
-      transactionId: tx.id,
-      accountId: holdsAccountId,
-      amountCents: -amountCents, // remove from holds
-    },
-    {
-      transactionId: tx.id,
-      accountId: creditsAccountId,
-      amountCents: amountCents, // return to credits
-    },
-  ]);
+  if (error) throw new Error(`Release error: ${error.message}`);
 
-  return { transactionId: tx.id, success: true };
+  return {
+    transactionId: data.transaction_id || "",
+    success: data.success,
+    error: data.error,
+  };
 }
 
-/**
- * Complete a spend (debit from holds → platform/merchant).
- * Called after a hold is approved.
- */
 export async function completeSpend(
-  db: Database,
+  client: SupabaseClient,
   holdsAccountId: string,
   platformAccountId: string,
   amountCents: number,
   metadata?: Record<string, unknown>,
   idempotencyKey?: string
 ): Promise<LedgerResult> {
-  const [tx] = await db
-    .insert(transactions)
-    .values({
-      type: "spend",
-      description: `Spend $${(amountCents / 100).toFixed(2)}`,
-      metadata,
-      idempotencyKey,
-    })
-    .returning();
+  const { data, error } = await client.rpc("bw_complete_spend", {
+    p_holds_account_id: holdsAccountId,
+    p_platform_account_id: platformAccountId,
+    p_amount_cents: amountCents,
+    p_metadata: metadata || null,
+    p_idempotency_key: idempotencyKey || null,
+  });
 
-  await db.insert(postings).values([
-    {
-      transactionId: tx.id,
-      accountId: holdsAccountId,
-      amountCents: -amountCents, // remove from holds (money leaves)
-    },
-    {
-      transactionId: tx.id,
-      accountId: platformAccountId,
-      amountCents: amountCents, // arrives at platform/external
-    },
-  ]);
+  if (error) throw new Error(`Spend error: ${error.message}`);
 
-  return { transactionId: tx.id, success: true };
+  return {
+    transactionId: data.transaction_id || "",
+    success: data.success,
+    error: data.error,
+  };
 }
 
-/**
- * Get transaction history for an account.
- */
 export async function getHistory(
-  db: Database,
+  client: SupabaseClient,
   accountId: string,
   options: { limit?: number; offset?: number } = {}
 ): Promise<HistoryEntry[]> {
   const { limit = 20, offset = 0 } = options;
 
-  const results = await db
-    .select({
-      id: transactions.id,
-      type: transactions.type,
-      amountCents: postings.amountCents,
-      description: transactions.description,
-      metadata: transactions.metadata,
-      createdAt: transactions.createdAt,
-    })
-    .from(postings)
-    .innerJoin(transactions, eq(postings.transactionId, transactions.id))
-    .where(eq(postings.accountId, accountId))
-    .orderBy(desc(transactions.createdAt))
-    .limit(limit)
-    .offset(offset);
+  const { data, error } = await client
+    .from(T.postings)
+    .select(`
+      amount_cents,
+      created_at,
+      ${T.transactions}:transaction_id (
+        id,
+        type,
+        description,
+        metadata,
+        created_at
+      )
+    `)
+    .eq("account_id", accountId)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
 
-  return results;
+  if (error) throw new Error(`History error: ${error.message}`);
+
+  return (data || []).map((row: any) => ({
+    id: row[T.transactions].id,
+    type: row[T.transactions].type,
+    amountCents: row.amount_cents,
+    description: row[T.transactions].description,
+    metadata: row[T.transactions].metadata,
+    createdAt: row[T.transactions].created_at,
+  }));
 }
 
-/**
- * Verify ledger integrity: sum of all postings for a transaction must be 0.
- */
 export async function verifyTransaction(
-  db: Database,
+  client: SupabaseClient,
   transactionId: string
 ): Promise<{ balanced: boolean; sum: number }> {
-  const result = await db
-    .select({
-      sum: sql<number>`SUM(${postings.amountCents})`,
-    })
-    .from(postings)
-    .where(eq(postings.transactionId, transactionId));
+  const { data, error } = await client.rpc("bw_verify_transaction", {
+    p_transaction_id: transactionId,
+  });
 
-  const sum = Number(result[0]?.sum ?? 0);
-  return { balanced: sum === 0, sum };
+  if (error) throw new Error(`Verify error: ${error.message}`);
+
+  return { balanced: data.balanced, sum: data.sum };
 }

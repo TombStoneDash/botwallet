@@ -1,6 +1,5 @@
-import { eq, and, gte, sql } from "drizzle-orm";
-import type { Database } from "@botwallet/db";
-import { policies, postings, accounts } from "@botwallet/db";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { T } from "@botwallet/db";
 
 // ─── Types ───
 
@@ -25,25 +24,31 @@ interface PolicyConfig {
   amount_cents?: number;
 }
 
+interface PolicyRow {
+  id: string;
+  type: string;
+  config: PolicyConfig;
+  active: boolean;
+}
+
 // ─── Policy Engine ───
 
-/**
- * Check all active policies for an agent against a spend request.
- * Returns approve/deny/require_human decision.
- */
 export async function checkPolicies(
-  db: Database,
+  client: SupabaseClient,
   check: SpendCheck
 ): Promise<PolicyDecision> {
-  // Get all active policies for this agent
-  const activePolicies = await db
-    .select()
-    .from(policies)
-    .where(and(eq(policies.agentId, check.agentId), eq(policies.active, true)));
+  const { data: activePolicies, error } = await client
+    .from(T.policies)
+    .select("id, type, config, active")
+    .eq("agent_id", check.agentId)
+    .eq("active", true);
 
-  // Check each policy in priority order
-  for (const policy of activePolicies) {
-    const config = policy.config as PolicyConfig;
+  if (error) throw new Error(`Policy check error: ${error.message}`);
+
+  const policies = (activePolicies || []) as PolicyRow[];
+
+  for (const policy of policies) {
+    const config = policy.config;
 
     switch (policy.type) {
       case "merchant_blocklist": {
@@ -101,12 +106,14 @@ export async function checkPolicies(
 
       case "daily_cap": {
         const dailyCap = config.amount_cents || 0;
-        const todaySpent = await getDailySpend(db, check.agentId);
-        if (todaySpent + check.amountCents > dailyCap) {
+        const { data: todaySpent } = await client.rpc("bw_get_daily_spend", {
+          p_agent_id: check.agentId,
+        });
+        if ((todaySpent || 0) + check.amountCents > dailyCap) {
           return {
             approved: false,
             autoApproved: false,
-            reason: `Would exceed daily cap of $${(dailyCap / 100).toFixed(2)} (spent today: $${(todaySpent / 100).toFixed(2)})`,
+            reason: `Would exceed daily cap of $${(dailyCap / 100).toFixed(2)} (spent today: $${((todaySpent || 0) / 100).toFixed(2)})`,
             policyId: policy.id,
             requiresHumanApproval: true,
           };
@@ -116,8 +123,10 @@ export async function checkPolicies(
 
       case "monthly_cap": {
         const monthlyCap = config.amount_cents || 0;
-        const monthSpent = await getMonthlySpend(db, check.agentId);
-        if (monthSpent + check.amountCents > monthlyCap) {
+        const { data: monthSpent } = await client.rpc("bw_get_monthly_spend", {
+          p_agent_id: check.agentId,
+        });
+        if ((monthSpent || 0) + check.amountCents > monthlyCap) {
           return {
             approved: false,
             autoApproved: false,
@@ -144,9 +153,7 @@ export async function checkPolicies(
     }
   }
 
-  // If no policy explicitly approved, require human approval
-  // (unless there's an auto-approve threshold that wasn't matched — meaning amount is above it)
-  const hasAutoApprove = activePolicies.some((p) => p.type === "auto_approve_threshold");
+  const hasAutoApprove = policies.some((p) => p.type === "auto_approve_threshold");
   if (hasAutoApprove) {
     return {
       approved: false,
@@ -156,7 +163,6 @@ export async function checkPolicies(
     };
   }
 
-  // No policies at all — auto-approve (open policy)
   return {
     approved: true,
     autoApproved: true,
@@ -164,67 +170,16 @@ export async function checkPolicies(
   };
 }
 
-// ─── Helpers ───
-
-async function getDailySpend(db: Database, agentId: string): Promise<number> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const result = await db
-    .select({
-      total: sql<number>`COALESCE(SUM(ABS(${postings.amountCents})), 0)`,
-    })
-    .from(postings)
-    .innerJoin(accounts, eq(postings.accountId, accounts.id))
-    .where(
-      and(
-        eq(accounts.agentId, agentId),
-        eq(accounts.type, "agent_credits"),
-        gte(postings.createdAt, today),
-        sql`${postings.amountCents} < 0` // only debits
-      )
-    );
-
-  return Number(result[0]?.total ?? 0);
-}
-
-async function getMonthlySpend(db: Database, agentId: string): Promise<number> {
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-
-  const result = await db
-    .select({
-      total: sql<number>`COALESCE(SUM(ABS(${postings.amountCents})), 0)`,
-    })
-    .from(postings)
-    .innerJoin(accounts, eq(postings.accountId, accounts.id))
-    .where(
-      and(
-        eq(accounts.agentId, agentId),
-        eq(accounts.type, "agent_credits"),
-        gte(postings.createdAt, monthStart),
-        sql`${postings.amountCents} < 0`
-      )
-    );
-
-  return Number(result[0]?.total ?? 0);
-}
-
-/**
- * Get a summary of active policies for an agent.
- */
 export async function getPolicySummary(
-  db: Database,
+  client: SupabaseClient,
   agentId: string
 ): Promise<Array<{ id: string; type: string; config: unknown; active: boolean }>> {
-  return db
-    .select({
-      id: policies.id,
-      type: policies.type,
-      config: policies.config,
-      active: policies.active,
-    })
-    .from(policies)
-    .where(and(eq(policies.agentId, agentId), eq(policies.active, true)));
+  const { data, error } = await client
+    .from(T.policies)
+    .select("id, type, config, active")
+    .eq("agent_id", agentId)
+    .eq("active", true);
+
+  if (error) throw new Error(`Policy summary error: ${error.message}`);
+  return data || [];
 }

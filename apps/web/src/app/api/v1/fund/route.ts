@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
-import { getDb } from "@/lib/db";
+import { getClient, T } from "@botwallet/db";
 import { fundAccount } from "@botwallet/ledger";
-import { accounts, agents, auditLog } from "@botwallet/db";
 
 export async function POST(request: Request) {
   let body: Record<string, unknown>;
@@ -33,23 +31,28 @@ export async function POST(request: Request) {
     );
   }
 
-  const db = getDb();
+  const client = getClient();
   const amountCents = Math.round(amountDollars * 100);
 
-  // Verify agent exists
-  const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
-  if (!agent) {
+  const { data: agent, error: agentErr } = await client
+    .from(T.agents)
+    .select("*")
+    .eq("id", agentId)
+    .single();
+
+  if (agentErr || !agent) {
     return NextResponse.json(
       { error: true, code: "NOT_FOUND", message: "Agent not found" },
       { status: 404 }
     );
   }
 
-  // Get agent's credits account
-  const [creditsAccount] = await db
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.agentId, agentId), eq(accounts.type, "agent_credits")));
+  const { data: creditsAccount } = await client
+    .from(T.accounts)
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("type", "agent_credits")
+    .single();
 
   if (!creditsAccount) {
     return NextResponse.json(
@@ -58,25 +61,30 @@ export async function POST(request: Request) {
     );
   }
 
-  // Get or create user funding source account
-  let [fundingAccount] = await db
-    .select()
-    .from(accounts)
-    .where(and(eq(accounts.userId, agent.ownerId), eq(accounts.type, "user_funding")));
+  let { data: fundingAccount } = await client
+    .from(T.accounts)
+    .select("*")
+    .eq("user_id", agent.owner_id)
+    .eq("type", "user_funding")
+    .single();
 
   if (!fundingAccount) {
-    [fundingAccount] = await db
-      .insert(accounts)
-      .values({
-        userId: agent.ownerId,
-        type: "user_funding",
-        name: "User Funding Source",
-      })
-      .returning();
+    const { data: newFunding } = await client
+      .from(T.accounts)
+      .insert({ user_id: agent.owner_id, type: "user_funding", name: "User Funding Source" })
+      .select()
+      .single();
+    fundingAccount = newFunding;
   }
 
-  // Fund the agent
-  const result = await fundAccount(db, {
+  if (!fundingAccount) {
+    return NextResponse.json(
+      { error: true, code: "INTERNAL_ERROR", message: "Could not create funding account" },
+      { status: 500 }
+    );
+  }
+
+  const result = await fundAccount(client, {
     fromAccountId: fundingAccount.id,
     toAccountId: creditsAccount.id,
     amountCents,
@@ -85,10 +93,9 @@ export async function POST(request: Request) {
     idempotencyKey: body.idempotency_key as string | undefined,
   });
 
-  // Audit log
-  await db.insert(auditLog).values({
-    actorType: "human",
-    actorId: agent.ownerId,
+  await client.from(T.audit_log).insert({
+    actor_type: "human",
+    actor_id: agent.owner_id,
     action: "agent_funded",
     target: agentId,
     details: { amountCents, reference },
