@@ -25,7 +25,13 @@
     "paths": {
       "@/*": [
         "./src/*"
-      ]
+      ],
+      "@botwallet/db": ["../../packages/db/src/index.ts"],
+      "@botwallet/db/*": ["../../packages/db/src/*"],
+      "@botwallet/ledger": ["../../packages/ledger/src/index.ts"],
+      "@botwallet/ledger/*": ["../../packages/ledger/src/*"],
+      "@botwallet/policy": ["../../packages/policy/src/index.ts"],
+      "@botwallet/policy/*": ["../../packages/policy/src/*"]
     }
   },
   "include": [
