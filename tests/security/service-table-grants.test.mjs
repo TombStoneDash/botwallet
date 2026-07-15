@@ -100,7 +100,7 @@ test("disposable PostgreSQL acceptance is wired into the security workflow", asy
   assert.match(workflow, /bash scripts\/test-service-table-grants-postgres\.sh/);
   assert.match(script, /005_revoke_service_table_client_grants\.sql/);
   assert.match(script, /005_verify_service_table_client_grants\.sql/);
-  assert.match(script, /SET ROLE anon/);
-  assert.match(script, /SET ROLE authenticated/);
+  assert.match(script, /assert_client_denied anon/);
+  assert.match(script, /assert_client_denied authenticated/);
   assert.match(script, /SET ROLE service_role/);
 });
