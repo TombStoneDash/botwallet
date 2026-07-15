@@ -6,6 +6,7 @@ on:
       - "sql/**"
       - "tests/security/**"
       - "scripts/test-rpc-lockdown-postgres.sh"
+      - "scripts/test-service-table-grants-postgres.sh"
       - "packages/db/**"
       - "packages/ledger/**"
       - "packages/policy/**"
@@ -21,6 +22,7 @@ on:
       - "sql/**"
       - "tests/security/**"
       - "scripts/test-rpc-lockdown-postgres.sh"
+      - "scripts/test-service-table-grants-postgres.sh"
       - "packages/db/**"
       - "packages/ledger/**"
       - "packages/policy/**"
@@ -85,8 +87,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes postgresql-client
 
-      - name: Prove grant migration in disposable PostgreSQL
+      - name: Prove financial RPC migration in disposable PostgreSQL
         run: bash scripts/test-rpc-lockdown-postgres.sh
+
+      - name: Prove service-only table grant migration in disposable PostgreSQL
+        run: bash scripts/test-service-table-grants-postgres.sh
 
       - name: Build application
         run: pnpm build
