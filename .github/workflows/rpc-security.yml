@@ -1,0 +1,92 @@
+name: RPC security
+
+on:
+  pull_request:
+    paths:
+      - "sql/**"
+      - "tests/security/**"
+      - "scripts/test-rpc-lockdown-postgres.sh"
+      - "packages/db/**"
+      - "packages/ledger/**"
+      - "packages/policy/**"
+      - "apps/web/src/app/api/v1/**"
+      - "apps/web/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/rpc-security.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "sql/**"
+      - "tests/security/**"
+      - "scripts/test-rpc-lockdown-postgres.sh"
+      - "packages/db/**"
+      - "packages/ledger/**"
+      - "packages/policy/**"
+      - "apps/web/src/app/api/v1/**"
+      - "apps/web/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/rpc-security.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rpc-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: botwallet_security
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d botwallet_security"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/botwallet_security
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.3 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run source-contract security tests
+        run: pnpm test:security
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Prove grant migration in disposable PostgreSQL
+        run: bash scripts/test-rpc-lockdown-postgres.sh
+
+      - name: Build application
+        run: pnpm build

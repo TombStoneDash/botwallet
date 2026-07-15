@@ -10,6 +10,7 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "test": "turbo test",
+    "test:security": "node --test tests/security/*.test.mjs",
     "db:generate": "cd packages/db && npx drizzle-kit generate",
     "db:push": "cd packages/db && npx drizzle-kit push",
     "db:studio": "cd packages/db && npx drizzle-kit studio"
