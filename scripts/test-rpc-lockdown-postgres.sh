@@ -30,6 +30,9 @@ EXCEPTION WHEN duplicate_object THEN
 END
 $$;
 
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 SQL
 
@@ -64,11 +67,24 @@ assert_client_denied() {
 assert_client_denied anon
 assert_client_denied authenticated
 
-service_output="$("${PSQL[@]}" -Atqc "SET ROLE service_role; SELECT public.bw_get_agent_balance('00000000-0000-0000-0000-000000000001'::uuid);")"
-if [[ "${service_output}" != *"available_cents"* ]] || [[ "${service_output}" != *"currency"* ]]; then
-  echo "ERROR: service_role RPC proof returned an unexpected payload" >&2
+registration_output="$("${PSQL[@]}" -Atqc "SET ROLE service_role; SELECT public.bw_register_agent('security-ci@example.invalid', 'Security CI', 'Security CI Agent', 'isolated grant probe', 'ci-security-hash', 'bw_ci...');")"
+if [[ "${registration_output}" != *"agent_id"* ]] || [[ "${registration_output}" != *"accounts"* ]]; then
+  echo "ERROR: service_role registration proof returned an unexpected payload" >&2
   exit 1
 fi
 
+agent_id="$("${PSQL[@]}" -Atqc "SELECT id FROM public.bw_agents WHERE api_key_hash = 'ci-security-hash';")"
+if [[ -z "${agent_id}" ]]; then
+  echo "ERROR: isolated registration did not create the expected agent" >&2
+  exit 1
+fi
+
+service_output="$("${PSQL[@]}" -Atqc "SET ROLE service_role; SELECT public.bw_get_agent_balance('${agent_id}'::uuid);")"
+if [[ "${service_output}" != *"available_cents"* ]] || [[ "${service_output}" != *"currency"* ]]; then
+  echo "ERROR: service_role balance proof returned an unexpected payload" >&2
+  exit 1
+fi
+
+echo "PASS: service_role registration resolves extensions.gen_random_bytes"
 echo "PASS: service_role can execute the read-only balance RPC"
 echo "PASS: isolated PostgreSQL grant-lockdown acceptance complete"
