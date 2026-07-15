@@ -18,6 +18,10 @@ DECLARE
     'public.bw_verify_transaction(uuid)'
   ];
 BEGIN
+  IF to_regprocedure('extensions.gen_random_bytes(integer)') IS NULL THEN
+    RAISE EXCEPTION 'Required Supabase extension function is missing: extensions.gen_random_bytes(integer)';
+  END IF;
+
   FOREACH signature IN ARRAY expected_signatures LOOP
     SELECT p.prosecdef, p.proconfig
       INTO is_definer, function_config
@@ -45,7 +49,7 @@ BEGIN
     END IF;
 
     IF function_config IS NULL
-       OR NOT ('search_path=pg_catalog, public, pg_temp' = ANY(function_config)) THEN
+       OR NOT ('search_path=pg_catalog, public, extensions, pg_temp' = ANY(function_config)) THEN
       RAISE EXCEPTION 'Fixed search_path missing for %: %', signature, function_config;
     END IF;
   END LOOP;
