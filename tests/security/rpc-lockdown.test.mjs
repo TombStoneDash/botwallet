@@ -32,8 +32,10 @@ test("lockdown migration fixes search_path and restricts every financial RPC", a
   for (const [name, args] of FUNCTIONS) {
     const signature = `public.${name}(${args})`;
     assert.ok(
-      sql.includes(`ALTER FUNCTION ${signature} SET search_path = pg_catalog, public, pg_temp;`),
-      `missing fixed search_path for ${signature}`,
+      sql.includes(
+        `ALTER FUNCTION ${signature} SET search_path = pg_catalog, public, extensions, pg_temp;`,
+      ),
+      `missing fixed extensions-aware search_path for ${signature}`,
     );
     assert.ok(
       sql.includes(`REVOKE EXECUTE ON FUNCTION ${signature} FROM PUBLIC, anon, authenticated;`),
@@ -49,6 +51,16 @@ test("lockdown migration fixes search_path and restricts every financial RPC", a
   assert.match(sql, /BEGIN;/);
   assert.match(sql, /COMMIT;$/);
   assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
+});
+
+test("fixed search_path preserves the live Supabase extension dependency", async () => {
+  const original = compactSql(await read("sql/002_rpc_functions.sql"));
+  const migration = compactSql(await read("sql/003_lockdown_rpc_grants.sql"));
+  const verify = compactSql(await read("sql/003_verify_rpc_lockdown.sql"));
+
+  assert.match(original, /gen_random_bytes\(32\)/);
+  assert.match(migration, /search_path = pg_catalog, public, extensions, pg_temp/);
+  assert.match(verify, /extensions\.gen_random_bytes\(integer\)/);
 });
 
 test("rollback is explicit, complete, and not wired to an automatic script", async () => {
