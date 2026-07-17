@@ -1,8 +1,20 @@
 import { NextResponse } from "next/server";
+import { authenticateAgent } from "@/lib/auth";
 import { getClient, T } from "@botwallet/db";
 import { fundAccount } from "@botwallet/ledger";
 
 export async function POST(request: Request) {
+  // X7 / remediation 0.2b: this endpoint used to accept an unauthenticated
+  // {agent_id, amount} body and credit any account — fail closed the same
+  // way /spend, /balance, /history, /policy already do (see lib/auth.ts).
+  const callerAgent = await authenticateAgent(request);
+  if (!callerAgent) {
+    return NextResponse.json(
+      { error: true, code: "UNAUTHORIZED", message: "Invalid or missing API key" },
+      { status: 401 }
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await request.json();

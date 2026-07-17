@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getClient } from "@botwallet/db";
-import { generateApiKey } from "@/lib/auth";
+import { authenticateAgent, generateApiKey } from "@/lib/auth";
 
 export async function GET() {
   return NextResponse.json({
@@ -17,6 +17,18 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // X7 / remediation 0.2b: this endpoint used to mint agents/accounts/API
+  // keys for anyone, no auth required — fail closed the same way /spend,
+  // /balance, /history, /policy already do (see lib/auth.ts). Registering
+  // an additional agent now requires an existing bw_... key.
+  const callerAgent = await authenticateAgent(request);
+  if (!callerAgent) {
+    return NextResponse.json(
+      { error: true, code: "UNAUTHORIZED", message: "Invalid or missing API key" },
+      { status: 401 }
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await request.json();
