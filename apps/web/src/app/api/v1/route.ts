@@ -15,7 +15,7 @@ export async function GET() {
       "GET  /api/v1/history": "Transaction history (agent auth)",
       "GET  /api/v1/policy": "View active policies (agent auth)",
       "POST /api/v1/fund": "Add funds to agent wallet (human/system)",
-      "POST /api/v1/gift-link": "Create shareable funding link",
+      "POST /api/v1/gift-link": "Create shareable funding link for your own agent (agent auth; target agent is bound to the bearer credential)",
       "POST /api/v1/freeze": "Freeze agent spending",
       "POST /api/v1/unfreeze": "Unfreeze agent spending",
       "GET  /api/v1/audit": "Full audit trail",
