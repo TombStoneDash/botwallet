@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getClient } from "@botwallet/db";
+import { getClient, T } from "@botwallet/db";
 
 export async function GET(
   _request: Request,
@@ -10,8 +10,7 @@ export async function GET(
     const client = getClient();
 
     const { data: link, error } = await client
-      .schema("botwallet")
-      .from("gift_links")
+      .from(T.gift_links)
       .select("title, message, goal_cents, raised_cents, active, agent_id")
       .eq("slug", slug)
       .single();
@@ -25,8 +24,7 @@ export async function GET(
 
     // Get agent name
     const { data: agent } = await client
-      .schema("botwallet")
-      .from("agents")
+      .from(T.agents)
       .select("name")
       .eq("id", link.agent_id)
       .single();
