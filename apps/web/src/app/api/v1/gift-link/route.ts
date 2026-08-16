@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getClient } from "@botwallet/db";
+import { getClient, T } from "@botwallet/db";
 
 export async function GET() {
   return NextResponse.json({
@@ -40,9 +40,15 @@ export async function POST(request: Request) {
   const client = getClient();
 
   const { data: link, error } = await client
-    .schema("botwallet")
-    .from("gift_links")
+    .from(T.gift_links)
     .insert({
+      // BLOCKER (separate from this fix, needs product identity authority):
+      // bw_gift_links.creator_id is FK'd to bw_users(id), but agentId is a
+      // bw_agents(id) — not the same id space. Every other agent-scoped
+      // route (see agent.owner_id in fund/route.ts) resolves the owning
+      // human explicitly rather than reusing the agent id. Left as-is
+      // pending that identity decision; do not "fix" by guessing which
+      // user id to substitute.
       creator_id: agentId, // TODO: use actual user ID
       agent_id: agentId,
       slug,
