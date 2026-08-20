@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
-import { getClient } from "@botwallet/db";
-import { generateApiKey } from "@/lib/auth";
+import { getClient, T } from "@botwallet/db";
+import { authenticateAgent, generateApiKey } from "@/lib/auth";
+import { authorizeRegister } from "@/lib/agent-authorization";
 
 export async function GET() {
   return NextResponse.json({
     endpoint: "/api/v1/register",
     method: "POST",
-    description: "Register a new agent and get an API key. Creates wallet accounts automatically.",
+    description:
+      "Register an additional agent under your own account and get an API key. Creates wallet accounts automatically. Requires an existing bw_... key — owner_email must match the authenticated caller's own account (owner_name is not editable here).",
     schema: {
-      owner_email: "string (required)",
-      owner_name: "string (optional)",
+      owner_email: "string (required) — must match the authenticated caller's own account email",
+      owner_name: "string (optional, ignored) — the caller's stored owner name is used instead",
       agent_name: "string (required)",
       agent_description: "string (optional)",
     },
@@ -17,6 +19,18 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // X7 / remediation 0.2b: this endpoint used to mint agents/accounts/API
+  // keys for anyone, no auth required — fail closed the same way /spend,
+  // /balance, /history, /policy already do (see lib/auth.ts). Registering
+  // an additional agent now requires an existing bw_... key.
+  const callerAgent = await authenticateAgent(request);
+  if (!callerAgent) {
+    return NextResponse.json(
+      { error: true, code: "UNAUTHORIZED", message: "Invalid or missing API key" },
+      { status: 401 }
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -38,11 +52,33 @@ export async function POST(request: Request) {
   }
 
   const client = getClient();
+
+  // PR7-R3: bearer auth alone is not authorization — resolve the caller's
+  // *canonical* owner record server-side via callerAgent.owner_id and bind
+  // the new agent to it. A supplied owner_email that doesn't match, or a
+  // caller whose owner record can't be resolved, fails closed before the
+  // SECURITY DEFINER RPC ever runs (see lib/agent-authorization.ts). This is
+  // the existing authenticated same-owner additional-agent flow — not a new
+  // bootstrap path.
+  const { data: canonicalOwner, error: ownerErr } = await client
+    .from(T.users)
+    .select("*")
+    .eq("id", callerAgent.owner_id)
+    .single();
+
+  const authz = authorizeRegister(ownerErr ? null : canonicalOwner, ownerEmail);
+  if (!authz.allowed) {
+    return NextResponse.json(
+      { error: true, code: "FORBIDDEN", message: "Not authorized to register an agent for this owner" },
+      { status: 403 }
+    );
+  }
+
   const { key, hash, prefix } = generateApiKey();
 
   const { data, error } = await client.rpc("bw_register_agent", {
-    p_owner_email: ownerEmail,
-    p_owner_name: (body.owner_name as string) || null,
+    p_owner_email: canonicalOwner.email,
+    p_owner_name: canonicalOwner.name,
     p_agent_name: agentName,
     p_agent_description: (body.agent_description as string) || null,
     p_api_key_hash: hash,
@@ -67,7 +103,7 @@ export async function POST(request: Request) {
       message: `${agentName} is registered! Save this API key — it won't be shown again.`,
       next_steps: {
         check_balance: "GET /api/v1/balance (Authorization: Bearer bw_...)",
-        fund_wallet: "POST /api/v1/fund { agent_id, amount }",
+        fund_wallet: "POST /api/v1/fund { agent_id, amount } — agent_id must be your own agent's id",
         spend: "POST /api/v1/spend { amount, merchant, description }",
       },
     },

@@ -1,8 +1,21 @@
 import { NextResponse } from "next/server";
+import { authenticateAgent } from "@/lib/auth";
 import { getClient, T } from "@botwallet/db";
 import { fundAccount } from "@botwallet/ledger";
+import { authorizeFund } from "@/lib/agent-authorization";
 
 export async function POST(request: Request) {
+  // X7 / remediation 0.2b: this endpoint used to accept an unauthenticated
+  // {agent_id, amount} body and credit any account — fail closed the same
+  // way /spend, /balance, /history, /policy already do (see lib/auth.ts).
+  const callerAgent = await authenticateAgent(request);
+  if (!callerAgent) {
+    return NextResponse.json(
+      { error: true, code: "UNAUTHORIZED", message: "Invalid or missing API key" },
+      { status: 401 }
+    );
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await request.json();
@@ -31,21 +44,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const client = getClient();
-  const amountCents = Math.round(amountDollars * 100);
-
-  const { data: agent, error: agentErr } = await client
-    .from(T.agents)
-    .select("*")
-    .eq("id", agentId)
-    .single();
-
-  if (agentErr || !agent) {
+  // PR7-R3: bearer auth alone is not authorization — the caller may only
+  // fund itself. Fail closed with a generic 403 before any target-account
+  // lookup or ledger mutation, so the response can't be used to enumerate
+  // other agents (see lib/agent-authorization.ts).
+  if (!authorizeFund(callerAgent, agentId).allowed) {
     return NextResponse.json(
-      { error: true, code: "NOT_FOUND", message: "Agent not found" },
-      { status: 404 }
+      { error: true, code: "FORBIDDEN", message: "Not authorized to fund this agent" },
+      { status: 403 }
     );
   }
+
+  const agent = callerAgent;
+  const client = getClient();
+  const amountCents = Math.round(amountDollars * 100);
 
   const { data: creditsAccount } = await client
     .from(T.accounts)
