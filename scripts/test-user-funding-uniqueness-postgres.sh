@@ -36,15 +36,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 SQL
 
-# The CI job deliberately runs three independent proofs against one disposable
-# PostgreSQL service. The earlier RPC proof may already have installed the
-# baseline schema; sql/001_schema.sql contains CREATE POLICY statements that
-# are intentionally not idempotent, so replaying it would fail before this
-# proof reaches migration 004. Create the baseline only for a clean standalone
-# run and otherwise reuse the already-proven schema.
-if [[ "$("${PSQL[@]}" -Atqc "SELECT to_regclass('public.bw_users') IS NOT NULL;")" != "t" ]]; then
-  "${PSQL[@]}" -f sql/001_schema.sql
-fi
+"${PSQL[@]}" -f sql/001_schema.sql
 "${PSQL[@]}" -f sql/002_rpc_functions.sql
 "${PSQL[@]}" -f sql/003_lockdown_rpc_grants.sql
 "${PSQL[@]}" -f sql/003_verify_rpc_lockdown.sql
