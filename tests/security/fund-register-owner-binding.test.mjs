@@ -192,27 +192,30 @@ test("proof: same-owner /register request invokes bw_register_agent with canonic
 // correct (that's what the runtime tests above are for) — they can only
 // prove the route *shape*, so this section is a companion, not the proof.
 
-test("fund/route.ts imports and calls authorizeFund, gated before any ledger mutation", async () => {
+// BOTWALLET-FUNDING-AUTHORITY (model A, 2026-08-24 decision) superseded the
+// PR7-R3 self/cross-agent authorizeFund(...) route guard for /fund: the
+// caller-binding check (below) proved a caller could only ever name *itself*
+// as the funded agent, but self-funding was exactly the exploitable path
+// (see fund-register-auth.test.mjs). /fund now fails closed for every
+// authenticated request before reaching any target-binding decision at all,
+// so it no longer imports or calls authorizeFund — that seam remains fully
+// covered by the pure-function tests above and stays available for a future
+// verified funding-authority principal (decision option B).
+test("fund/route.ts no longer imports or calls authorizeFund (superseded by the model-A fail-closed response)", async () => {
   const source = await read("apps/web/src/app/api/v1/fund/route.ts");
-
-  assert.match(
+  // Match actual usage (an import or a call), not the identifier appearing
+  // anywhere in the file — the route's explanatory comment legitimately
+  // names the superseded function when describing why it was removed.
+  assert.doesNotMatch(
     source,
     /import\s*\{[^}]*\bauthorizeFund\b[^}]*\}\s*from\s*["']@\/lib\/agent-authorization["']/,
-    "fund/route.ts does not import authorizeFund from @/lib/agent-authorization"
+    "fund/route.ts must not import authorizeFund — funding is fail-closed before any target-binding decision, see fund-register-auth.test.mjs"
   );
-
-  const guardMatch = source.match(/if\s*\(\s*!authorizeFund\([^)]*\)\.allowed\s*\)\s*\{[\s\S]*?status:\s*403[\s\S]*?\}/);
-  assert.ok(guardMatch, "fund/route.ts does not gate on `if (!authorizeFund(...).allowed)` with a 403 response");
-
-  const guardIndex = source.indexOf(guardMatch[0]);
-  for (const mutationToken of [".from(T.accounts)", "fundAccount(", ".insert("]) {
-    const tokenIndex = source.indexOf(mutationToken);
-    assert.ok(tokenIndex !== -1, `expected to find ${mutationToken} in fund/route.ts`);
-    assert.ok(
-      guardIndex < tokenIndex,
-      `authorizeFund guard (at ${guardIndex}) must appear before ${mutationToken} (at ${tokenIndex})`
-    );
-  }
+  assert.doesNotMatch(
+    source,
+    /authorizeFund\s*\(/,
+    "fund/route.ts must not call authorizeFund(...) — funding is fail-closed before any target-binding decision, see fund-register-auth.test.mjs"
+  );
 });
 
 test("register/route.ts imports and calls authorizeRegister, gated before the bw_register_agent RPC", async () => {

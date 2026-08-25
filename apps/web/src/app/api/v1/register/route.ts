@@ -103,7 +103,6 @@ export async function POST(request: Request) {
       message: `${agentName} is registered! Save this API key — it won't be shown again.`,
       next_steps: {
         check_balance: "GET /api/v1/balance (Authorization: Bearer bw_...)",
-        fund_wallet: "POST /api/v1/fund { agent_id, amount } — agent_id must be your own agent's id",
         spend: "POST /api/v1/spend { amount, merchant, description }",
       },
     },

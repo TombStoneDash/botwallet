@@ -44,19 +44,15 @@ function TerminalDemo() {
       ]);
       setStep("fund");
     } else if (s === "fund") {
-      setDemoState((prev) => ({
-        ...prev,
-        balance: 5000,
-        history: [{ type: "credit", amount: 5000, desc: "Initial funding", time: "just now" }],
-      }));
+      setDemoState((prev) => ({ ...prev, balance: 5000, history: [{ type: "credit", amount: 5000, desc: "Demo-only sample credit (no payment)", time: "just now" }] }));
       addOutput([
         '$ curl -X POST /api/v1/fund \\',
-        '  -d \'{"agent_id": "...", "amount_cents": 5000, "source": "stripe"}\'',
+        `  -H "Authorization: Bearer ${demoState.apiKey}"`,
         "",
-        "→ 200 OK",
-        JSON.stringify({ funded: true, amount_cents: 5000, balance_cents: 5000, source: "stripe_checkout" }, null, 2),
+        "→ 403 Forbidden",
+        JSON.stringify({ error: true, code: "FUNDING_UNAVAILABLE" }, null, 2),
         "",
-        "✓ $50.00 added to Daisy's wallet.",
+        "✓ Agent funding is blocked. The remaining interactive demo uses sample credits only; no payment occurs.",
       ]);
       setStep("spend");
     } else if (s === "spend") {
@@ -117,7 +113,7 @@ function TerminalDemo() {
 
   const buttonLabels: Record<Step, string> = {
     register: "1. Register Agent →",
-    fund: "2. Fund Wallet →",
+    fund: "2. Verify Funding Gate →",
     spend: "3. Agent Spends →",
     check: "4. Check Balance →",
   };
@@ -225,7 +221,7 @@ export default function Home() {
         </p>
         <p style={{ fontSize: "0.85rem", color: "#555", maxWidth: "500px", margin: "0 auto", lineHeight: 1.6 }}>
           Prepaid wallets for AI agents with spending policies, double-entry accounting, 
-          and gift links. Stripe-native. Open source. No crypto required.
+          and gift-link records. Stripe checkout is planned, not live. Open source. No crypto required.
         </p>
       </div>
 
@@ -251,7 +247,7 @@ export default function Home() {
         </h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
           <WalletCard icon="🔑" title="1. Register" desc="Create an agent identity. Get an API key + auto-provisioned wallet with double-entry accounts." />
-          <WalletCard icon="💰" title="2. Fund" desc="Add money via Stripe Checkout, gift links, or recurring allowances. Funds appear instantly." />
+          <WalletCard icon="💰" title="2. Fund" desc="Funding is not live yet. Agent credentials are blocked; Stripe checkout remains planned." />
           <WalletCard icon="🤖" title="3. Spend" desc="Agent sends spend requests. Policy engine auto-approves or escalates to human based on rules." />
           <WalletCard icon="📊" title="4. Audit" desc="Every transaction in a tamper-evident double-entry ledger. Full history, exportable, always balanced." />
         </div>
@@ -265,7 +261,7 @@ export default function Home() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
           <WalletCard icon="📒" title="Double-Entry Ledger" desc="Real accounting. Every credit has a debit. Balances always reconcile. Can't lose money to rounding errors." />
           <WalletCard icon="🛡️" title="Policy Engine" desc="Per-merchant limits, daily/monthly caps, auto-approve thresholds, category blocks. You set the rules." />
-          <WalletCard icon="🎁" title="Gift Links" desc="Generate shareable URLs: 'Fund Daisy $20.' Anyone can click, pay via Stripe, and top up the bot's wallet." />
+          <WalletCard icon="🎁" title="Gift Links" desc="Generate shareable URLs. Stripe checkout and wallet credit are not implemented yet." />
           <WalletCard icon="🔐" title="Hold/Release" desc="Place holds for pending spends. Release on completion, refund on failure. Like a hotel pre-auth, for bots." />
           <WalletCard icon="❄️" title="Freeze/Unfreeze" desc="Kill switch. Instantly freeze all agent spending with one API call. Unfreeze when ready." />
           <WalletCard icon="🧾" title="Full Audit Trail" desc="Every spend tied to agent, task, policy decision, and timestamp. Exportable for compliance." />
@@ -284,7 +280,7 @@ export default function Home() {
             <span style={{ color: "#666", textAlign: "center" }}>Coinbase</span>
           </div>
           <ComparisonRow feature="No crypto required" us={true} them="✗" />
-          <ComparisonRow feature="Stripe-native payments" us={true} them="✗" />
+          <ComparisonRow feature="Stripe checkout live" us={false} them="✗" />
           <ComparisonRow feature="Open source" us={true} them="✗" />
           <ComparisonRow feature="Self-hostable" us={true} them="✗" />
           <ComparisonRow feature="Policy engine" us={true} them="Partial" />
@@ -295,8 +291,7 @@ export default function Home() {
           <ComparisonRow feature="DeFi integrations" us={false} them="✓" />
         </div>
         <p style={{ fontFamily: "monospace", fontSize: "0.7rem", color: "#444", marginTop: "0.75rem" }}>
-          Coinbase went crypto-native. We went Stripe-native. 90% of developers don&apos;t want to touch crypto. 
-          BotWall3t is for them.
+          Coinbase went crypto-native. BotWall3t is building a policy-first, non-crypto path; Stripe checkout is still planned.
         </p>
       </div>
 
@@ -308,12 +303,12 @@ export default function Home() {
         <div style={{ backgroundColor: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: "8px", padding: "1.25rem", fontFamily: "monospace", fontSize: "0.7rem", lineHeight: 2 }}>
           <div style={{ color: "#555" }}>
             <span style={{ color: "#00ff88" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/register</span> — Create agent + get API key<br />
-            <span style={{ color: "#00ff88" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/fund</span> — Add funds to wallet<br />
+            <span style={{ color: "#00ff88" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/fund</span> — Returns 403; funding authority unavailable<br />
             <span style={{ color: "#ffd700" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/spend</span> — Request a spend (policy-checked)<br />
             <span style={{ color: "#87ceeb" }}>GET</span>&nbsp; <span style={{ color: "#888" }}>/api/v1/balance</span> — Check wallet balance<br />
             <span style={{ color: "#87ceeb" }}>GET</span>&nbsp; <span style={{ color: "#888" }}>/api/v1/history</span> — Transaction history<br />
             <span style={{ color: "#87ceeb" }}>GET</span>&nbsp; <span style={{ color: "#888" }}>/api/v1/policy</span> — View active policies<br />
-            <span style={{ color: "#00ff88" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/gift-link</span> — Create shareable funding URL<br />
+            <span style={{ color: "#00ff88" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/gift-link</span> — Link record only; checkout is not live<br />
             <span style={{ color: "#ff5f57" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/freeze</span> — Kill switch: freeze spending<br />
             <span style={{ color: "#00ff88" }}>POST</span> <span style={{ color: "#888" }}>/api/v1/unfreeze</span> — Resume spending<br />
             <span style={{ color: "#87ceeb" }}>GET</span>&nbsp; <span style={{ color: "#888" }}>/api/v1/audit</span> — Full audit trail<br />

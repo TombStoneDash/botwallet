@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/auth";
-import { getClient, T } from "@botwallet/db";
-import { fundAccount } from "@botwallet/ledger";
-import { authorizeFund } from "@/lib/agent-authorization";
 
+// BOTWALLET-FUNDING-AUTHORITY: model A (2026-08-24 decision, recorded in
+// BOTWALLET_PR7_FUNDING_AUTHORITY_DECISION_GATE_20260729.md). An agent's own
+// bearer credential proves the agent's identity, not funding authority — the
+// prior caller-must-target-itself guard (agent-authorization.ts's now-unused
+// fund seam) let any agent fund *itself* an arbitrary amount against a
+// caller-supplied stripe_payment_id, minting ledger credit with no verified
+// payment (a disposable review database accepted 100000000 cents this way).
+// Fail closed here — after authentication, before body parsing or any funding,
+// ledger, audit-log, or service-role mutation — until a separately verified
+// funding-authority principal (decision option B) is implemented. This
+// performs no funding RPC, ledger, or audit-log mutation for any request shape;
+// authenticateAgent still performs its required read-only identity lookup.
 export async function POST(request: Request) {
-  // X7 / remediation 0.2b: this endpoint used to accept an unauthenticated
-  // {agent_id, amount} body and credit any account — fail closed the same
-  // way /spend, /balance, /history, /policy already do (see lib/auth.ts).
   const callerAgent = await authenticateAgent(request);
   if (!callerAgent) {
     return NextResponse.json(
@@ -16,112 +22,13 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: true, code: "BAD_REQUEST", message: "Invalid JSON" },
-      { status: 400 }
-    );
-  }
-
-  const agentId = body.agent_id as string;
-  const amountDollars = body.amount as number;
-  const reference = body.stripe_payment_id as string | undefined;
-
-  if (!agentId || !amountDollars) {
-    return NextResponse.json(
-      { error: true, code: "VALIDATION_ERROR", message: "agent_id and amount are required" },
-      { status: 422 }
-    );
-  }
-
-  if (amountDollars <= 0) {
-    return NextResponse.json(
-      { error: true, code: "VALIDATION_ERROR", message: "amount must be positive" },
-      { status: 422 }
-    );
-  }
-
-  // PR7-R3: bearer auth alone is not authorization — the caller may only
-  // fund itself. Fail closed with a generic 403 before any target-account
-  // lookup or ledger mutation, so the response can't be used to enumerate
-  // other agents (see lib/agent-authorization.ts).
-  if (!authorizeFund(callerAgent, agentId).allowed) {
-    return NextResponse.json(
-      { error: true, code: "FORBIDDEN", message: "Not authorized to fund this agent" },
-      { status: 403 }
-    );
-  }
-
-  const agent = callerAgent;
-  const client = getClient();
-  const amountCents = Math.round(amountDollars * 100);
-
-  const { data: creditsAccount } = await client
-    .from(T.accounts)
-    .select("*")
-    .eq("agent_id", agentId)
-    .eq("type", "agent_credits")
-    .single();
-
-  if (!creditsAccount) {
-    return NextResponse.json(
-      { error: true, code: "INTERNAL_ERROR", message: "Agent accounts not configured" },
-      { status: 500 }
-    );
-  }
-
-  let { data: fundingAccount } = await client
-    .from(T.accounts)
-    .select("*")
-    .eq("user_id", agent.owner_id)
-    .eq("type", "user_funding")
-    .single();
-
-  if (!fundingAccount) {
-    const { data: newFunding } = await client
-      .from(T.accounts)
-      .insert({ user_id: agent.owner_id, type: "user_funding", name: "User Funding Source" })
-      .select()
-      .single();
-    fundingAccount = newFunding;
-  }
-
-  if (!fundingAccount) {
-    return NextResponse.json(
-      { error: true, code: "INTERNAL_ERROR", message: "Could not create funding account" },
-      { status: 500 }
-    );
-  }
-
-  const result = await fundAccount(client, {
-    fromAccountId: fundingAccount.id,
-    toAccountId: creditsAccount.id,
-    amountCents,
-    description: `Fund ${agent.name} $${amountDollars.toFixed(2)}`,
-    reference,
-    idempotencyKey: body.idempotency_key as string | undefined,
-  });
-
-  await client.from(T.audit_log).insert({
-    actor_type: "human",
-    actor_id: agent.owner_id,
-    action: "agent_funded",
-    target: agentId,
-    details: { amountCents, reference },
-  });
-
   return NextResponse.json(
     {
-      funded: true,
-      agent: agent.name,
-      amount: `$${amountDollars.toFixed(2)}`,
-      amount_cents: amountCents,
-      transaction_id: result.transactionId,
-      message: `${agent.name}'s wallet has been funded.`,
+      error: true,
+      code: "FUNDING_UNAVAILABLE",
+      message:
+        "Agent-initiated funding is not available. An agent's own API key cannot add funds to any wallet, including its own.",
     },
-    { status: 201 }
+    { status: 403 }
   );
 }

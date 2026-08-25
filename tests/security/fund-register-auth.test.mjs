@@ -121,6 +121,72 @@ test("fund and register check auth before doing any body parsing or database wor
   }
 });
 
+// BOTWALLET-FUNDING-AUTHORITY (model A, 2026-08-24 decision): an agent's own
+// bearer credential proves identity, not funding authority. /fund must
+// return one stable funding-unavailable response after authentication and
+// before parsing the body, opening a database client, looking up an
+// account, invoking service-role/RPC code, writing an audit row, or
+// changing a ledger/balance — for every request shape, including malformed,
+// oversized, or forged-payment-reference bodies (which are never parsed at
+// all, so their shape/size/content is irrelevant).
+
+test("fund's POST handler performs zero body parsing, database, RPC, ledger, or audit work for any request", async () => {
+  const source = await read("apps/web/src/app/api/v1/fund/route.ts");
+  const postIndex = source.indexOf("export async function POST");
+  const postSource = source.slice(postIndex);
+
+  const forbiddenTokens = [
+    "request.json(",
+    "request.text(",
+    "request.body",
+    "getClient(",
+    ".rpc(",
+    "fundAccount(",
+    ".insert(",
+    ".from(T.accounts)",
+    ".from(T.audit_log)",
+    "authorizeFund(",
+  ];
+
+  for (const token of forbiddenTokens) {
+    assert.ok(
+      !postSource.includes(token),
+      `fund/route.ts POST handler must not contain "${token}" — model A fails closed before any body/database/RPC/ledger/audit work, so malformed, huge, or forged-payment-reference request bodies can never reach a side effect`
+    );
+  }
+});
+
+test("fund's POST handler returns one stable funding-unavailable response after authentication", async () => {
+  const source = await read("apps/web/src/app/api/v1/fund/route.ts");
+  const postIndex = source.indexOf("export async function POST");
+  const postSource = source.slice(postIndex);
+
+  const authCallIndex = postSource.indexOf("await authenticateAgent(request)");
+  assert.ok(authCallIndex !== -1, "fund/route.ts POST handler never calls authenticateAgent");
+
+  const unavailableMatch = postSource.match(
+    /code:\s*"FUNDING_UNAVAILABLE"[\s\S]*?status:\s*403/
+  );
+  assert.ok(
+    unavailableMatch,
+    "fund/route.ts POST handler does not return a stable FUNDING_UNAVAILABLE / 403 response"
+  );
+
+  const unavailableIndex = postSource.indexOf(unavailableMatch[0]);
+  assert.ok(
+    authCallIndex < unavailableIndex,
+    "the FUNDING_UNAVAILABLE response must be reachable only after the authenticateAgent(request) check, so invalid credentials still receive 401 first"
+  );
+
+  // Exactly one return path after auth: no branch that reaches a 200/201
+  // funded response for any authenticated request.
+  assert.doesNotMatch(
+    postSource,
+    /status:\s*20[01]/,
+    "fund/route.ts POST handler must not contain any 200/201 (funded) response path"
+  );
+});
+
 test("register's GET handler (self-documentation only, no state change) is unchanged and stays public, matching the /spend precedent", async () => {
   const source = await read("apps/web/src/app/api/v1/register/route.ts");
   const getIndex = source.indexOf("export async function GET");
