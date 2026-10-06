@@ -7,6 +7,7 @@ on:
       - "tests/security/**"
       - "scripts/test-rpc-lockdown-postgres.sh"
       - "scripts/test-service-table-grants-postgres.sh"
+      - "scripts/test-user-funding-uniqueness-postgres.sh"
       - "packages/db/**"
       - "packages/ledger/**"
       - "packages/policy/**"
@@ -23,6 +24,7 @@ on:
       - "tests/security/**"
       - "scripts/test-rpc-lockdown-postgres.sh"
       - "scripts/test-service-table-grants-postgres.sh"
+      - "scripts/test-user-funding-uniqueness-postgres.sh"
       - "packages/db/**"
       - "packages/ledger/**"
       - "packages/policy/**"
@@ -92,6 +94,12 @@ jobs:
 
       - name: Prove service-only table grant migration in disposable PostgreSQL
         run: bash scripts/test-service-table-grants-postgres.sh
+
+      - name: Prove same-owner user_funding account invariant in disposable PostgreSQL
+        run: |
+          psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE botwallet_user_funding'
+          DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/botwallet_user_funding' \
+            bash scripts/test-user-funding-uniqueness-postgres.sh
 
       - name: Build application
         run: pnpm build

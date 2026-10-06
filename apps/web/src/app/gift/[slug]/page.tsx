@@ -121,27 +121,24 @@ export default function GiftPage() {
             }}
           />
           <button
+            disabled
             style={{
               width: '100%',
               padding: '0.75rem',
-              background: '#00ff88',
-              color: '#000',
+              background: '#222',
+              color: '#777',
               border: 'none',
               borderRadius: '4px',
-              cursor: 'pointer',
+              cursor: 'not-allowed',
               fontFamily: 'inherit',
               fontWeight: 700,
               fontSize: '1rem',
             }}
-            onClick={() => {
-              // TODO: Stripe Checkout integration
-              alert(`Stripe Checkout coming soon! Would fund $${amount} to ${gift.agent_name}.`);
-            }}
           >
-            Fund ${amount} →
+            Stripe checkout coming soon
           </button>
           <p style={{ fontSize: '0.65rem', color: '#444', textAlign: 'center', marginTop: '0.75rem' }}>
-            Powered by Stripe. Secure checkout.
+            Checkout is not live. No payment will be processed and no wallet credit will be added.
           </p>
         </div>
 
