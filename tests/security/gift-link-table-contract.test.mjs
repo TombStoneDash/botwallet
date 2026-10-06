@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 // schema (commit e987dfb: "Tables use bw_ prefix in public schema for
 // Supabase compatibility"). packages/db/src/index.ts's `T` map already
 // encodes that: T.gift_links === "bw_gift_links". Every other route
-// touched by that same commit (fund, history, balance, policy, register)
+// touched by that same commit (history, balance, policy, register)
 // queries via `client.from(T.<name>)` with no `.schema()` call and works.
 // Only the two gift-link routes deviated: they called
 // `client.schema("botwallet").from("gift_links")` — a schema that is never
@@ -38,11 +38,13 @@ const GIFT_LINK_SLUG_ROUTE = "apps/web/src/app/api/v1/gift-link/[slug]/route.ts"
 const DB_INDEX = "packages/db/src/index.ts";
 const SCHEMA_SQL = "sql/001_schema.sql";
 
-// Reference routes from the same 2026-02-22 Supabase pivot commit that were
-// wired up correctly from day one — proves gift-link now matches, not just
-// "uses some table name".
+// Reference routes from the same 2026-02-22 Supabase pivot commit that still
+// perform database work and were wired up correctly from day one. The fund
+// route is intentionally absent: funding-authority model A makes it return a
+// stable 403 before all database work, which its dedicated security contract
+// verifies. This list proves gift-link matches live persistence routes rather
+// than requiring every route to query a table.
 const REFERENCE_ROUTES_USING_T_MAP = [
-  "apps/web/src/app/api/v1/fund/route.ts",
   "apps/web/src/app/api/v1/history/route.ts",
   "apps/web/src/lib/auth.ts",
 ];
