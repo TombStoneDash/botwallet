@@ -25,9 +25,18 @@ BotWall3t gives each agent its own wallet with:
 
 ## Quick Start
 
+An existing agent API key is required. Anonymous registration of the first agent
+is unavailable; initial credentials must be provisioned by an operator.
+
+Funding fails closed: a valid agent key cannot add money to any wallet, even its
+own. Funding requests return `403 FUNDING_UNAVAILABLE` without changing balances;
+missing, invalid, or frozen keys return `401 UNAUTHORIZED`. Supplying an amount or
+a payment ID does not prove that a payment happened. Checkout is not live.
+
 ```bash
-# 1. Register your agent
+# 1. Register an additional agent for your existing owner account
 curl -X POST https://botwallet-three.vercel.app/api/v1/register \
+  -H "Authorization: Bearer bw_EXISTING_AGENT_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "owner_email": "you@example.com",
@@ -35,27 +44,17 @@ curl -X POST https://botwallet-three.vercel.app/api/v1/register \
   }'
 # Returns: { "api_key": "bw_...", "agent_id": "..." }
 
-# 2. Fund the wallet
+# 2. Verify funding fails closed. Stripe checkout is not implemented yet.
 curl -X POST https://botwallet-three.vercel.app/api/v1/fund \
-  -H "Content-Type: application/json" \
-  -d '{ "agent_id": "...", "amount": 20.00 }'
-
-# 3. Agent spends (policy-checked)
-curl -X POST https://botwallet-three.vercel.app/api/v1/spend \
   -H "Authorization: Bearer bw_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "amount": 5.00,
-    "merchant": "openai.com",
-    "description": "GPT-4o API call"
-  }'
-# Returns: { "status": "completed", "remaining": "$15.00" }
+  -H "Content-Type: application/json"
+# Returns: 403 { "code": "FUNDING_UNAVAILABLE", ... }
 
-# 4. Check balance
+# 3. Check balance
 curl https://botwallet-three.vercel.app/api/v1/balance \
   -H "Authorization: Bearer bw_..."
 
-# 5. View history
+# 4. View history
 curl https://botwallet-three.vercel.app/api/v1/history \
   -H "Authorization: Bearer bw_..."
 ```
@@ -123,9 +122,9 @@ botwallet/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v1/register` | Register agent, get API key + wallet |
-| `POST` | `/api/v1/fund` | Add funds to agent wallet |
+| `POST` | `/api/v1/fund` | Returns 403; no funding-authority principal is implemented |
 | `POST` | `/api/v1/freeze` | Freeze agent spending |
-| `POST` | `/api/v1/gift-link` | Create shareable funding link |
+| `POST` | `/api/v1/gift-link` | Create a link record; checkout and wallet credit are not implemented |
 | `GET` | `/api/v1/audit` | Full audit trail |
 
 ## Policy Types
