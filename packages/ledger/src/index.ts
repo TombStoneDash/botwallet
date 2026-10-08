@@ -173,6 +173,7 @@ export async function getHistory(
     `)
     .eq("account_id", accountId)
     .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (error) throw new Error(`History error: ${error.message}`);
