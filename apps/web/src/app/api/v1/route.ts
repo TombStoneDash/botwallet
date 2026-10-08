@@ -16,9 +16,6 @@ export async function GET() {
       "GET  /api/v1/policy": "View active policies (agent auth)",
       "POST /api/v1/fund": "Returns 403 FUNDING_UNAVAILABLE — no funding-authority principal is implemented.",
       "POST /api/v1/gift-link": "Create a link record for your own agent (agent auth); checkout and wallet credit are not implemented yet",
-      "POST /api/v1/freeze": "Freeze agent spending",
-      "POST /api/v1/unfreeze": "Unfreeze agent spending",
-      "GET  /api/v1/audit": "Full audit trail",
     },
     auth: {
       agent: "Bearer bw_... (API key from /register)",
