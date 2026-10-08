@@ -11,11 +11,14 @@ export async function GET(
 
     const { data: link, error } = await client
       .from(T.gift_links)
-      .select("title, message, goal_cents, raised_cents, active, agent_id")
+      .select("title, message, goal_cents, raised_cents, active, agent_id, expires_at")
       .eq("slug", slug)
       .single();
 
-    if (error || !link || !link.active) {
+    if (
+      error || !link || !link.active ||
+      (link.expires_at != null && new Date(link.expires_at).getTime() <= Date.now())
+    ) {
       return NextResponse.json(
         { error: true, code: "NOT_FOUND", message: "Gift link not found or inactive" },
         { status: 404 }
