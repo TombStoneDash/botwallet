@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       id: e.id,
       type: e.type,
       amount_cents: e.amountCents,
-      amount: `${e.amountCents >= 0 ? "+" : ""}$${(Math.abs(e.amountCents) / 100).toFixed(2)}`,
+      amount: `${e.amountCents >= 0 ? "+" : "-"}$${(Math.abs(e.amountCents) / 100).toFixed(2)}`,
       description: e.description,
       metadata: e.metadata,
       created_at: e.createdAt,
