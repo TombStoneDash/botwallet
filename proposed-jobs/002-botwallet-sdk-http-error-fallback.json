@@ -1,0 +1,8 @@
+{
+  "slug": "sdk-http-error-fallback",
+  "repo_dir": "~/Projects/botwallet",
+  "gh_repo": "TombStoneDash/botwallet",
+  "base": "main",
+  "title": "Retain SDK HTTP status when an error response is not JSON",
+  "prompt": "Make SDK failures usable when a server or proxy returns a non-JSON error; work on the assigned branch you are on. Edit only packages/sdk/src/index.ts as production code. packages/sdk/src/index.ts:85-93 calls res.json() before checking res.ok. Consequently an HTML 503 response rejects with SyntaxError and loses the HTTP status instead of reaching BotWalletError. A local run of the real SDK balance() with a stub fetch returning HTML at status 503 verified this. BotWalletError already exposes code and status at lines 127-135.\n\nHandle body parsing failures on unsuccessful HTTP responses by throwing BotWalletError with the actual status, UNKNOWN code, and the existing status-based fallback message. Preserve structured JSON error codes/messages and successful JSON response behavior. A malformed successful response may still reject as a parse error; do not silently turn it into valid data. Do not expose raw HTML in error messages or add retries, transport requests, or authentication changes.\n\nAdd tests/sdk/http-error-fallback.test.mjs. Load the real SDK using Node's TypeScript stripping and compileFunction, injecting a stub fetch without modifying global network behavior. Cover HTML 503, empty 502, structured JSON error, successful balance JSON, and malformed successful JSON. Run node --test tests/sdk/http-error-fallback.test.mjs and node --test tests/security/*.test.mjs. Use fixtures only; no credentials, payments, sends, deployments, migrations, .github/workflows or package.json changes. Do not commit or push."
+}

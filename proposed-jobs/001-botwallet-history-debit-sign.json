@@ -1,0 +1,8 @@
+{
+  "slug": "history-debit-sign",
+  "repo_dir": "~/Projects/botwallet",
+  "gh_repo": "TombStoneDash/botwallet",
+  "base": "main",
+  "title": "Preserve the minus sign in transaction history amounts",
+  "prompt": "Fix the displayed debit amount in the history response; work on the assigned branch you are on. The only production file to edit is apps/web/src/app/api/v1/history/route.ts. At apps/web/src/app/api/v1/history/route.ts:40, the formatter supplies an empty prefix for negative values and then uses Math.abs, so a posting with amountCents=-499 becomes \"$4.99\" instead of \"-$4.99\". Lines 38-40 expose both the negative amount_cents and the contradictory display string. A local execution of the real GET handler with stubbed dependencies reproduced this exact output.\n\nChange only the display formatter to prefix negative values with a minus sign, preserving the existing positive plus sign, dollar symbol, two decimal places, and numeric amount_cents. Zero should retain its existing \"+$0.00\" representation. Do not change pagination, ledger calculations, response fields, or authentication.\n\nAdd tests/api/history-debit-sign.test.mjs using node:test and the stripTypeScriptTypes/compileFunction loading approach demonstrated in tests/security/funding-runtime.test.mjs. Stub authentication as an already resolved fixture and replace only transport/framework dependencies. Execute the actual GET handler for -499, 499, -1, and 0; assert both display strings and unchanged numeric values. Run node --test tests/api/history-debit-sign.test.mjs and node --test tests/security/*.test.mjs. Keep the change offline: no credentials, external requests, payments, sends, deployments, migrations, workflow or package.json edits. Do not commit or push."
+}

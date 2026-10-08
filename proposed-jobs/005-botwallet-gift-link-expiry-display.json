@@ -1,0 +1,8 @@
+{
+  "slug": "gift-link-expiry-display",
+  "repo_dir": "~/Projects/botwallet",
+  "gh_repo": "TombStoneDash/botwallet",
+  "base": "main",
+  "title": "Treat expired gift links as unavailable in the public lookup",
+  "prompt": "Honor the stored expiry when displaying a gift link; work on the assigned branch you are on. Change only apps/web/src/app/api/v1/gift-link/[slug]/route.ts as production code. Its line 14 projection omits expires_at, and lines 18-22 check only query errors, missing records, and active status. Yet sql/001_schema.sql:113 defines expires_at, creation stores it at apps/web/src/app/api/v1/gift-link/route.ts:91, and apps/web/src/app/gift/[slug]/page.tsx:40-41 tells visitors expired links are unavailable. Executing the real lookup with an active fixture expired in 2000 returned HTTP 200 locally.\n\nInclude expires_at in the lookup projection and return the existing 404 NOT_FOUND response when a non-null expiry is at or before the current time. Keep null expiry valid and future expiry valid. Evaluate expiry before the agent-name lookup. Preserve the successful response shape and avoid changing stored records, authorization, or checkout behavior; this is only public display lifecycle handling.\n\nAdd tests/api/gift-link-expiry.test.mjs using node:test, the existing TypeScript-stripping loader pattern, a fixed clock, and a read-only query stub. Cover past expiry, exact-now expiry, future expiry, null expiry, inactive records, and missing records. Assert expired records skip the agent query and make no writes. Run node --test tests/api/gift-link-expiry.test.mjs and node --test tests/security/*.test.mjs. No credentials, payments, sends, deployments, migrations, workflows, package.json or auth changes. Do not commit or push."
+}
