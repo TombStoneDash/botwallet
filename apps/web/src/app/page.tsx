@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 type Step = "register" | "fund" | "spend" | "check";
 type DemoState = {
@@ -186,16 +186,6 @@ function ComparisonRow({ us, them, feature }: { us: boolean; them: string; featu
 }
 
 export default function Home() {
-  const [liveStats, setLiveStats] = useState<{ agents: number; transactions: number } | null>(null);
-
-  useEffect(() => {
-    // Try to fetch live stats
-    fetch("/api/v1")
-      .then((r) => r.json())
-      .then(() => setLiveStats({ agents: 1, transactions: 3 })) // Placeholder — will be real soon
-      .catch(() => null);
-  }, []);
-
   return (
     <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "2rem", maxWidth: "800px", margin: "0 auto" }}>
 
@@ -230,7 +220,6 @@ export default function Home() {
       <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontFamily: "monospace", fontSize: "0.7rem", color: "#444", border: "1px solid #1a1a1a", padding: "6px 16px", borderRadius: "100px", marginBottom: "3rem" }}>
         <span style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#00ff88", display: "inline-block" }} />
         API live at /api/v1
-        {liveStats && <span style={{ color: "#333" }}> · {liveStats.transactions} txns</span>}
       </div>
 
       {/* Interactive Demo */}
