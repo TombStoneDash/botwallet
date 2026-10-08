@@ -82,7 +82,10 @@ export class BotWallet {
       },
     });
 
-    const data = await res.json();
+    const data = await res.json().catch((error: unknown) => {
+      if (res.ok) throw error;
+      return {};
+    });
 
     if (!res.ok) {
       const error = data as { code?: string; message?: string };
